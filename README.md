@@ -59,7 +59,6 @@ cat > /etc/hotplug.d/usb/30-fm350-fcc << 'SCRIPT_EOF'
 
 [ "$ACTION" = "add" ] || exit 0
 
-# Match FM350-GL by product ID (with or without leading zero)
 case "${PRODUCT}" in
     0e8d/7126/*|e8d/7126/*|0e8d/7127/*|e8d/7127/*)
         ;;
@@ -122,24 +121,63 @@ if ! echo "$OX2" | grep -q "+GTFCCLOCKVER: 1"; then
 fi
 logger -t fm350-fcc "FCC unlock SUCCESS"
 
-# Set APN (change "internet" to your carrier's APN if needed)
+# === ROOter Connection Sequence ===
+logger -t fm350-fcc "Starting ROOter-style connection sequence"
+
+# 1. Enable 5G registration
+COMMAND="AT+C5GREG=3" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+
+# 2. Set network registration URCs with extended info
+COMMAND="AT+CREG=2;+CGREG=2;+CEREG=2" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+
+# 3. Set initial attach APN (critical for network registration)
+COMMAND='AT+EIAAPN="internet",0,"IP","IP",0,"",""' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+
+# 4. Set operator format (ignore ERROR if already connected)
+COMMAND="AT+COPS=2;+COPS=3,0" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+
+# 5. Configure PDP context 0 (used for initial attachment)
+COMMAND='AT+CGDCONT=0,"IP","internet"' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+
+# 6. Configure PDP context 1 (used for data)
 COMMAND='AT+CGDCONT=1,"IP","internet"' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-sleep 1
 
-# Activate PDP context with retry
-OX3=$(COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
-if ! echo "$OX3" | grep -q "+CGEV: ME PDN ACT"; then
+# 7. Attach to packet domain
+logger -t fm350-fcc "Attaching to packet domain"
+COMMAND="AT+CGATT=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+sleep 3
+
+# Check attachment
+ATT_CHECK=$(COMMAND="AT+CGATT?" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
+if ! echo "$ATT_CHECK" | grep -q "+CGATT: 1"; then
+    logger -t fm350-fcc "CGATT failed, retrying..."
     sleep 2
-    OX3=$(COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
+    COMMAND="AT+CGATT=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+    sleep 3
 fi
-logger -t fm350-fcc "PDP context activated"
 
-sleep 2
+# 8. Activate PDP context
+logger -t fm350-fcc "Activating PDP context"
+COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+sleep 3
 
-# Get IP and DNS
+# Verify activation
+ACT_CHECK=$(COMMAND="AT+CGACT?" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
+if echo "$ACT_CHECK" | grep -q "+CGACT: 1,1"; then
+    logger -t fm350-fcc "PDP context activated (confirmed)"
+else
+    # Try once more
+    logger -t fm350-fcc "Retrying PDP activation..."
+    sleep 2
+    COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+    sleep 3
+fi
+
+# 9. Get IP
 OX4=$(COMMAND="AT+CGPADDR=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
 IPADDR=$(echo "$OX4" | grep "+CGPADDR:" | cut -d'"' -f2)
 
+# 10. Get DNS
 OX5=$(COMMAND="AT+CGCONTRDP=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
 DNS1=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f6)
 DNS2=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f8)
