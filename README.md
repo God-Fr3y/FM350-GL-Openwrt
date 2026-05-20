@@ -67,7 +67,7 @@ case "${PRODUCT}" in
         ;;
 esac
 
-logger -t fm350-fcc "FM350-GL detected (PRODUCT=$PRODUCT), waiting for devices"
+logger -t fm350-fcc "FM350-GL detected, waiting for devices"
 
 MAX_WAIT=30
 WAITED=0
@@ -77,7 +77,7 @@ while [ ! -c /dev/ttyUSB1 ] && [ $WAITED -lt $MAX_WAIT ]; do
 done
 
 if [ ! -c /dev/ttyUSB1 ]; then
-    logger -t fm350-fcc "ERROR: /dev/ttyUSB1 not found after ${MAX_WAIT}s"
+    logger -t fm350-fcc "ERROR: /dev/ttyUSB1 not found"
     exit 1
 fi
 
@@ -92,7 +92,7 @@ logger -t fm350-fcc "Devices ready, starting FCC unlock"
 VENDOR_ID_HASH="3df8c719"
 TTY="/dev/ttyUSB1"
 
-# FCC Unlock with retry
+# FCC Unlock
 OX=$(COMMAND="AT+GTFCCLOCKGEN" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
 CHALLENGE=$(echo "$OX" | grep -o '0x[0-9a-fA-F]\+' | head -1)
 
@@ -121,63 +121,31 @@ if ! echo "$OX2" | grep -q "+GTFCCLOCKVER: 1"; then
 fi
 logger -t fm350-fcc "FCC unlock SUCCESS"
 
-# === ROOter Connection Sequence ===
-logger -t fm350-fcc "Starting ROOter-style connection sequence"
-
-# 1. Enable 5G registration
+# Enable 5G registration
 COMMAND="AT+C5GREG=3" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+sleep 1
 
-# 2. Set network registration URCs with extended info
-COMMAND="AT+CREG=2;+CGREG=2;+CEREG=2" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-
-# 3. Set initial attach APN (critical for network registration)
-COMMAND='AT+EIAAPN="internet",0,"IP","IP",0,"",""' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-
-# 4. Set operator format (ignore ERROR if already connected)
-COMMAND="AT+COPS=2;+COPS=3,0" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-
-# 5. Configure PDP context 0 (used for initial attachment)
-COMMAND='AT+CGDCONT=0,"IP","internet"' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-
-# 6. Configure PDP context 1 (used for data)
+# Set APN and activate - same as original working method
 COMMAND='AT+CGDCONT=1,"IP","internet"' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
+sleep 1
 
-# 7. Attach to packet domain
-logger -t fm350-fcc "Attaching to packet domain"
-COMMAND="AT+CGATT=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-sleep 3
-
-# Check attachment
-ATT_CHECK=$(COMMAND="AT+CGATT?" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
-if ! echo "$ATT_CHECK" | grep -q "+CGATT: 1"; then
-    logger -t fm350-fcc "CGATT failed, retrying..."
-    sleep 2
-    COMMAND="AT+CGATT=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
-    sleep 3
-fi
-
-# 8. Activate PDP context
-logger -t fm350-fcc "Activating PDP context"
 COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
 sleep 3
 
-# Verify activation
+# Check if activation worked
 ACT_CHECK=$(COMMAND="AT+CGACT?" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
-if echo "$ACT_CHECK" | grep -q "+CGACT: 1,1"; then
-    logger -t fm350-fcc "PDP context activated (confirmed)"
-else
-    # Try once more
-    logger -t fm350-fcc "Retrying PDP activation..."
+if ! echo "$ACT_CHECK" | grep -q "+CGACT: 1,1"; then
     sleep 2
     COMMAND="AT+CGACT=1,1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
     sleep 3
 fi
+logger -t fm350-fcc "PDP context activated"
 
-# 9. Get IP
+# Get IP
 OX4=$(COMMAND="AT+CGPADDR=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
 IPADDR=$(echo "$OX4" | grep "+CGPADDR:" | cut -d'"' -f2)
 
-# 10. Get DNS
+# Get DNS
 OX5=$(COMMAND="AT+CGCONTRDP=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
 DNS1=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f6)
 DNS2=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f8)
@@ -189,14 +157,10 @@ if [ -z "$IPADDR" ] || [ "$IPADDR" = "0.0.0.0" ]; then
     exit 1
 fi
 
-# Calculate gateway (last octet - 1)
 GATEWAY=$(echo "$IPADDR" | awk -F. '{if($4>1) $4=$4-1; print $1"."$2"."$3"."$4}')
-
-# Build DNS string
 DNS_LIST="$DNS1"
 [ -n "$DNS2" ] && DNS_LIST="$DNS_LIST $DNS2"
 
-# Update UCI network config
 uci set network.wan_5g=interface
 uci set network.wan_5g.proto='static'
 uci set network.wan_5g.device='eth2'
@@ -208,7 +172,6 @@ uci set network.wan_5g.dns="$DNS_LIST"
 uci set network.wan_5g.peerdns='0'
 uci commit network
 
-# Ensure wan_5g is in WAN firewall zone for NAT
 FIREWALL_ZONE=$(uci show firewall | grep -E "\.network=.*wan_5g" | head -1)
 if [ -z "$FIREWALL_ZONE" ]; then
     uci add_list firewall.@zone[1].network='wan_5g'
@@ -216,11 +179,9 @@ if [ -z "$FIREWALL_ZONE" ]; then
     /etc/init.d/firewall restart
 fi
 
-# Restart the interface so netifd handles routing/masquerade/DNS
 ifup wan_5g
 
 logger -t fm350-fcc "Connection complete: $IPADDR via $GATEWAY"
-SCRIPT_EOF
 
 chmod +x /etc/hotplug.d/usb/30-fm350-fcc
 ```
