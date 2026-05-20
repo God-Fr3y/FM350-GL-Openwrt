@@ -153,8 +153,9 @@ IPADDR=$(echo "$OX4" | grep "+CGPADDR:" | cut -d'"' -f2)
 
 # Get DNS
 OX5=$(COMMAND="AT+CGCONTRDP=1" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom 2>/dev/null)
-DNS1=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f6)
-DNS2=$(echo "$OX5" | grep "+CGCONTRDP:" | cut -d'"' -f8)
+DNS_ALL=$(echo "$OX5" | grep -o '"[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+"' | tr -d '"')
+DNS1=$(echo "$DNS_ALL" | head -1)
+DNS2=$(echo "$DNS_ALL" | head -2 | tail -1)
 
 logger -t fm350-fcc "IP=$IPADDR DNS=$DNS1,$DNS2"
 
