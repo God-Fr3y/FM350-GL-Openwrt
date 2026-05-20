@@ -67,6 +67,12 @@ case "${PRODUCT}" in
         ;;
 esac
 
+# Skip if already connected (prevents duplicate runs)
+if ip addr show eth2 2>/dev/null | grep -q "inet .*\/30"; then
+    logger -t fm350-fcc "Already connected, skipping"
+    exit 0
+fi
+
 logger -t fm350-fcc "FM350-GL detected, waiting for devices"
 
 MAX_WAIT=30
@@ -125,7 +131,7 @@ logger -t fm350-fcc "FCC unlock SUCCESS"
 COMMAND="AT+C5GREG=3" gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
 sleep 1
 
-# Set APN and activate - same as original working method
+# Set APN and activate
 COMMAND='AT+CGDCONT=1,"IP","internet"' gcom -d "$TTY" -s /etc/gcom/run-at-print.gcom >/dev/null 2>&1
 sleep 1
 
@@ -182,8 +188,10 @@ fi
 ifup wan_5g
 
 logger -t fm350-fcc "Connection complete: $IPADDR via $GATEWAY"
+SCRIPT_EOF
 
 chmod +x /etc/hotplug.d/usb/30-fm350-fcc
+
 ```
 
 Step 4: Configure the WAN Interface (Initial Setup)
