@@ -300,6 +300,8 @@ fm350_full_bringup() {
     fm350_configure_network || return 1
     return 0
 }
+
+chmod +x /etc/fm350-lib.sh
 SCRIPT_EOF
 ```
 Create monitor script
@@ -369,6 +371,14 @@ if ping -I eth2 -c 2 -W 3 "$PING_TARGET" >/dev/null 2>&1; then
 else
     logger -t fm350-fcc "monitor: recovery ran but connectivity still failing - may need investigation"
 fi
+
+chmod +x /etc/fm350-monitor.sh
+
+/etc/init.d/cron enable
+/etc/init.d/cron start
+
+echo "*/2 * * * * /etc/fm350-monitor.sh" >> /etc/crontabs/root
+/etc/init.d/cron restart
 SCRIPT_EOF
 ```
 
