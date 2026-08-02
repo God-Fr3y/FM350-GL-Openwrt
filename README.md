@@ -301,8 +301,8 @@ fm350_full_bringup() {
     return 0
 }
 
-chmod +x /etc/fm350-lib.sh
 SCRIPT_EOF
+chmod +x /etc/fm350-lib.sh
 ```
 Create monitor script
 ```
@@ -372,6 +372,8 @@ else
     logger -t fm350-fcc "monitor: recovery ran but connectivity still failing - may need investigation"
 fi
 
+SCRIPT_EOF
+
 chmod +x /etc/fm350-monitor.sh
 
 /etc/init.d/cron enable
@@ -379,7 +381,6 @@ chmod +x /etc/fm350-monitor.sh
 
 echo "*/2 * * * * /etc/fm350-monitor.sh" >> /etc/crontabs/root
 /etc/init.d/cron restart
-SCRIPT_EOF
 ```
 
 Step 4: Configure the WAN Interface (Initial Setup)
