@@ -1,0 +1,37 @@
+#!/bin/sh
+# /etc/hotplug.d/usb/30-fm350-fcc
+#
+# Runs FCC unlock + PDP activation + network config when the FM350-GL
+# enumerates. Only handles the ONE-TIME device-add event; ongoing
+# connectivity is watched separately by /etc/fm350-monitor.sh (cron).
+# This same script also fires automatically after /etc/fm350-restart.sh
+# resets the modem, since a reset causes the modem to re-enumerate on USB.
+
+[ "$ACTION" = "add" ] || exit 0
+
+case "${PRODUCT}" in
+    0e8d/7126/*|e8d/7126/*|0e8d/7127/*|e8d/7127/*)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+# Composite device fires a uevent per interface (RNDIS + N serial ports).
+# Only act on the whole-device event, not each interface's.
+if [ "$DEVTYPE" != "usb_device" ]; then
+    exit 0
+fi
+
+. /etc/fm350-lib.sh
+
+LOCKFILE="/var/run/fm350-fcc.lock"
+exec 200>"$LOCKFILE"
+flock -n 200 || { logger -t fm350-fcc "Another instance running, exiting"; exit 0; }
+
+TTY="/dev/ttyUSB1"
+GCOM_SCRIPT="/etc/gcom/run-at-print.gcom"
+
+logger -t fm350-fcc "FM350-GL detected, waiting for AT port"
+
+fm350_full_bringup || exit 1
