@@ -42,6 +42,7 @@ The `etc/` layout mirrors the real router filesystem on purpose — `install.sh`
 - OpenWrt installed in **router mode** (not dumb AP)
 - Internet access on the router for package installation (Ethernet WAN or WiFi client, temporarily)
 - SSH access to the router
+- `git-http` if cloning directly on the router: `apk add git git-http` (stock `git` lacks HTTPS support — fails with `remote-https is not a git command` otherwise)
 - `git` available somewhere to clone this repo (on the router itself, or clone elsewhere and `scp`/copy the folder over)
 
 ---
